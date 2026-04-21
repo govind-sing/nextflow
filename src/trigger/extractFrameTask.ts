@@ -19,8 +19,16 @@ export const extractFrameTask = task({
     const ffmpegPath  = (await import('@ffmpeg-installer/ffmpeg')).default;
     const ffprobePath = (await import('@ffprobe-installer/ffprobe')).default;
 
-    ffmpeg.setFfmpegPath(ffmpegPath.path);
-    ffmpeg.setFfprobePath(ffprobePath.path);  // ← add this
+    // Set FFmpeg paths - handle both default and named exports
+    const ffmpegBinary = ffmpegPath?.path || ffmpegPath;
+    const ffprobeBinary = ffprobePath?.path || ffprobePath;
+
+    if (!ffmpegBinary) {
+      throw new Error('FFmpeg binary not found. Please ensure @ffmpeg-installer/ffmpeg is installed.');
+    }
+
+    ffmpeg.setFfmpegPath(ffmpegBinary);
+    ffmpeg.setFfprobePath(ffprobeBinary);
 
     const { nodeExecutionId, videoUrl, timestamp = '0' } = payload;
 
