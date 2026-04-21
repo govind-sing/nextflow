@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     const parsed = WebhookSchema.safeParse(body);
 
     if (!parsed.success) {
+      console.error('[Webhook] Invalid payload', { details: parsed.error.flatten() });
       return NextResponse.json(
         { error: 'Invalid data', details: parsed.error.flatten() },
         { status: 400 }
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
     }
 
     const { workflowId, nodes, edges, userId = 'webhook-user' } = parsed.data;
+
+    console.log('[Webhook] Received workflow trigger', {
+      workflowId,
+      nodeCount: nodes.length,
+      userId,
+      timestamp: new Date().toISOString(),
+    });
 
     // Step 1: Create WorkflowRun record
     const run = await prisma.workflowRun.create({
@@ -83,108 +91,136 @@ export async function POST(req: Request) {
       const execution = nodeExecutions.find((e) => e.nodeId === node.id);
       if (!execution) continue;
 
-      // Text and Upload nodes → mark SUCCESS immediately
-      if (
-        node.type === 'textNode' ||
-        node.type === 'imageUploadNode' ||
-        node.type === 'videoUploadNode'
-      ) {
+      try {
+        // Text and Upload nodes → mark SUCCESS immediately
+        if (
+          node.type === 'textNode' ||
+          node.type === 'imageUploadNode' ||
+          node.type === 'videoUploadNode'
+        ) {
+          await prisma.nodeExecution.update({
+            where: { id: execution.id },
+            data: {
+              status: 'SUCCESS',
+              outputData: {
+                text: node.data.text,
+                imageUrl: node.data.imageUrl,
+                videoUrl: node.data.videoUrl,
+              },
+              duration: '0.0s',
+              completedAt: new Date(),
+            },
+          });
+          continue;
+        }
+
+        if (node.type === 'llmNode') {
+          const userMsgNode = getConnectedNodeData(node.id, 'user_message');
+          const systemPrmtNode = getConnectedNodeData(
+            node.id,
+            'system_prompt'
+          );
+          const imageNode = getConnectedNodeData(node.id, 'images');
+
+          const userMessage =
+            (userMsgNode?.data?.text as string) || 'Hello';
+          const systemPrompt =
+            (systemPrmtNode?.data?.text as string) || undefined;
+
+          const imageUrl =
+            imageNode?.data?.imageUrl || imageNode?.data?.outputUrl;
+          const imageUrls = imageUrl ? ([imageUrl as string]) : [];
+
+          console.log('[Webhook LLM] Triggering task', {
+            nodeId: node.id,
+            model: node.data.model,
+            hasSystemPrompt: !!systemPrompt,
+            userMessageLength: userMessage.length,
+            imageUrlCount: imageUrls.length,
+          });
+
+          await llmTask.trigger({
+            nodeExecutionId: execution.id,
+            model: (node.data.model as string) || 'gemini-2.5-flash',
+            systemPrompt,
+            userMessage,
+            imageUrls,
+          });
+
+          console.log('[Webhook LLM] Task triggered successfully', { nodeId: node.id });
+        }
+
+        if (node.type === 'cropImageNode') {
+          const imageNode = getConnectedNodeData(node.id, 'image_url');
+
+          let imageUrl = (imageNode?.data?.imageUrl as string) || '';
+          if (!imageUrl && node.data.imageUrl) {
+            imageUrl = node.data.imageUrl as string;
+          }
+
+          if (!imageUrl) {
+            await prisma.nodeExecution.update({
+              where: { id: execution.id },
+              data: {
+                status: 'FAILED',
+                error: 'No image URL provided. Connect an image upload node.',
+                completedAt: new Date(),
+              },
+            });
+            continue;
+          }
+
+          await cropImageTask.trigger({
+            nodeExecutionId: execution.id,
+            imageUrl,
+            xPercent: (node.data.xPercent as number) ?? 0,
+            yPercent: (node.data.yPercent as number) ?? 0,
+            widthPercent: (node.data.widthPercent as number) ?? 100,
+            heightPercent: (node.data.heightPercent as number) ?? 100,
+          });
+        }
+
+        if (node.type === 'extractFrameNode') {
+          const videoNode = getConnectedNodeData(node.id, 'video_url');
+
+          let videoUrl = (videoNode?.data?.videoUrl as string) || '';
+          if (!videoUrl && node.data.videoUrl) {
+            videoUrl = node.data.videoUrl as string;
+          }
+
+          if (!videoUrl) {
+            await prisma.nodeExecution.update({
+              where: { id: execution.id },
+              data: {
+                status: 'FAILED',
+                error: 'No video URL provided. Connect a video upload node.',
+                completedAt: new Date(),
+              },
+            });
+            continue;
+          }
+
+          await extractFrameTask.trigger({
+            nodeExecutionId: execution.id,
+            videoUrl,
+            timestamp: (node.data.timestamp as string) || '0',
+          });
+        }
+      } catch (nodeError) {
+        console.error('[Webhook] Error triggering node task', {
+          nodeId: node.id,
+          nodeType: node.type,
+          error: String(nodeError),
+          stack: nodeError instanceof Error ? nodeError.stack : undefined,
+        });
+
         await prisma.nodeExecution.update({
           where: { id: execution.id },
           data: {
-            status: 'SUCCESS',
-            outputData: {
-              text: node.data.text,
-              imageUrl: node.data.imageUrl,
-              videoUrl: node.data.videoUrl,
-            },
-            duration: '0.0s',
+            status: 'FAILED',
+            error: String(nodeError),
             completedAt: new Date(),
           },
-        });
-        continue;
-      }
-
-      if (node.type === 'llmNode') {
-        const userMsgNode = getConnectedNodeData(node.id, 'user_message');
-        const systemPrmtNode = getConnectedNodeData(
-          node.id,
-          'system_prompt'
-        );
-        const imageNode = getConnectedNodeData(node.id, 'images');
-
-        const userMessage =
-          (userMsgNode?.data?.text as string) || 'Hello';
-        const systemPrompt =
-          (systemPrmtNode?.data?.text as string) || undefined;
-
-        const imageUrl =
-          imageNode?.data?.imageUrl || imageNode?.data?.outputUrl;
-        const imageUrls = imageUrl ? ([imageUrl as string]) : [];
-
-        await llmTask.trigger({
-          nodeExecutionId: execution.id,
-          model: (node.data.model as string) || 'gemini-2.5-flash',
-          systemPrompt,
-          userMessage,
-          imageUrls,
-        });
-      }
-
-      if (node.type === 'cropImageNode') {
-        const imageNode = getConnectedNodeData(node.id, 'image_url');
-
-        let imageUrl = (imageNode?.data?.imageUrl as string) || '';
-        if (!imageUrl && node.data.imageUrl) {
-          imageUrl = node.data.imageUrl as string;
-        }
-
-        if (!imageUrl) {
-          await prisma.nodeExecution.update({
-            where: { id: execution.id },
-            data: {
-              status: 'FAILED',
-              error: 'No image URL provided. Connect an image upload node.',
-              completedAt: new Date(),
-            },
-          });
-          continue;
-        }
-
-        await cropImageTask.trigger({
-          nodeExecutionId: execution.id,
-          imageUrl,
-          xPercent: (node.data.xPercent as number) ?? 0,
-          yPercent: (node.data.yPercent as number) ?? 0,
-          widthPercent: (node.data.widthPercent as number) ?? 100,
-          heightPercent: (node.data.heightPercent as number) ?? 100,
-        });
-      }
-
-      if (node.type === 'extractFrameNode') {
-        const videoNode = getConnectedNodeData(node.id, 'video_url');
-
-        let videoUrl = (videoNode?.data?.videoUrl as string) || '';
-        if (!videoUrl && node.data.videoUrl) {
-          videoUrl = node.data.videoUrl as string;
-        }
-
-        if (!videoUrl) {
-          await prisma.nodeExecution.update({
-            where: { id: execution.id },
-            data: {
-              status: 'FAILED',
-              error: 'No video URL provided. Connect a video upload node.',
-              completedAt: new Date(),
-            },
-          });
-          continue;
-        }
-
-        await extractFrameTask.trigger({
-          nodeExecutionId: execution.id,
-          videoUrl,
-          timestamp: (node.data.timestamp as string) || '0',
         });
       }
     }
