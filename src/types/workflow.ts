@@ -8,6 +8,7 @@ export type NodeType =
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   label: string;
+  model?: string;
   isExecuting?: boolean;
   output?: string;  // For LLM node results
 }
