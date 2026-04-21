@@ -18,6 +18,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Verify Trigger.dev is configured
+  if (!process.env.TRIGGER_SECRET_KEY) {
+    console.error('[Workflow Run] Missing TRIGGER_SECRET_KEY environment variable');
+    return NextResponse.json(
+      { error: 'Trigger.dev not configured - missing TRIGGER_SECRET_KEY' },
+      { status: 500 }
+    );
+  }
+
   const body   = await req.json();
   const parsed = RunWorkflowSchema.safeParse(body);
   if (!parsed.success) {
@@ -31,6 +40,7 @@ export async function POST(req: Request) {
     workflowId,
     nodeCount: nodes.length,
     userId,
+    hasTriggerKey: !!process.env.TRIGGER_SECRET_KEY,
     timestamp: new Date().toISOString(),
   });
 

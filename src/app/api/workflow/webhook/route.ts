@@ -27,6 +27,15 @@ const WebhookSchema = z.object({
  */
 export async function POST(req: Request) {
   try {
+    // Verify Trigger.dev is configured
+    if (!process.env.TRIGGER_SECRET_KEY) {
+      console.error('[Webhook] Missing TRIGGER_SECRET_KEY environment variable');
+      return NextResponse.json(
+        { error: 'Trigger.dev not configured - missing TRIGGER_SECRET_KEY' },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json();
     const parsed = WebhookSchema.safeParse(body);
 
@@ -44,6 +53,7 @@ export async function POST(req: Request) {
       workflowId,
       nodeCount: nodes.length,
       userId,
+      hasTriggerKey: !!process.env.TRIGGER_SECRET_KEY,
       timestamp: new Date().toISOString(),
     });
 
