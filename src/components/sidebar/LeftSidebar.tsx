@@ -26,6 +26,7 @@ export default function LeftSidebar() {
       data: {
         label,
         isExecuting: false,
+        ...(type === 'llmNode' && { model: 'gemini-2.5-flash' }),
       },
     });
   };
