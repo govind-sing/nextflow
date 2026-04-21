@@ -16,16 +16,22 @@ export const extractFrameTask = task({
   run: async (payload: ExtractFramePayload) => {
     // ✅ Dynamic import inside run function
     const ffmpeg      = (await import('fluent-ffmpeg')).default;
-    const ffmpegPath  = (await import('@ffmpeg-installer/ffmpeg')).default;
-    const ffprobePath = (await import('@ffprobe-installer/ffprobe')).default;
+    const ffmpegInstaller = await import('@ffmpeg-installer/ffmpeg');
+    const ffprobeInstaller = await import('@ffprobe-installer/ffprobe');
 
-    // Set FFmpeg paths - handle both default and named exports
-    const ffmpegBinary = typeof ffmpegPath === 'string' ? ffmpegPath : ffmpegPath?.path;
-    const ffprobeBinary = typeof ffprobePath === 'string' ? ffprobePath : ffprobePath?.path;
+    // Get the actual binary paths - don't use .default
+    const ffmpegBinary = ffmpegInstaller.path;
+    const ffprobeBinary = ffprobeInstaller.path;
 
-    if (!ffmpegBinary) {
-      throw new Error('FFmpeg binary not found. Please ensure @ffmpeg-installer/ffmpeg is installed.');
+    if (!ffmpegBinary || !ffprobeBinary) {
+      throw new Error(
+        `FFmpeg binaries not found. ` +
+        `ffmpeg: ${ffmpegBinary}, ffprobe: ${ffprobeBinary}. ` +
+        `Please ensure @ffmpeg-installer/ffmpeg and @ffprobe-installer/ffprobe are in dependencies.`
+      );
     }
+
+    console.log('[ExtractFrame] FFmpeg paths:', { ffmpegBinary, ffprobeBinary });
 
     ffmpeg.setFfmpegPath(ffmpegBinary);
     ffmpeg.setFfprobePath(ffprobeBinary);
