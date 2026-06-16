@@ -14,7 +14,7 @@
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^6.19.3",
-    "@trigger.dev/sdk": "^4.4.4",
+    "@trigger.dev/sdk": "4.4.6",
     "@uppy/core": "^5.2.0",
     "@uppy/dashboard": "^5.1.1",
     "@uppy/react": "^5.2.0",
